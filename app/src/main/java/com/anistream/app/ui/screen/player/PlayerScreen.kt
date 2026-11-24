@@ -47,6 +47,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.ui.AspectRatioFrameLayout
 import androidx.media3.ui.PlayerView
+import com.anistream.app.player.source.PlaybackKind
 import com.anistream.app.player.state.TrackOption
 import com.anistream.app.ui.common.episodeLabel
 import com.anistream.app.ui.common.findActivity
@@ -107,6 +108,16 @@ fun PlayerScreen(
             message = state.error.orEmpty(),
             onBack = onBack,
             onRetry = viewModel::retryPlayback
+        )
+
+        state.playbackKind == PlaybackKind.EMBEDDED -> EmbeddedPlayerScreen(
+            state = state,
+            onBack = onBack,
+            onSelectSource = viewModel::selectEmbeddedSource,
+            onRetry = viewModel::retryPlayback,
+            onPageStarted = viewModel::onEmbeddedPageStarted,
+            onPageFinished = viewModel::onEmbeddedPageFinished,
+            onPageError = viewModel::onEmbeddedPageError
         )
 
         !state.sourceAvailable -> UnavailableSourceScreen(
@@ -517,7 +528,7 @@ private fun PlayerControls(
 }
 
 @Composable
-private fun PlayerTopBar(
+internal fun PlayerTopBar(
     title: String,
     subtitle: String?,
     onBack: () -> Unit,
@@ -647,14 +658,14 @@ private fun UnavailableSourceScreen(
             }
             Spacer(Modifier.height(16.dp))
             Text(
-                text = "No native source available",
+                text = "No playable source available",
                 style = MaterialTheme.typography.headlineSmall,
                 textAlign = TextAlign.Center
             )
             Spacer(Modifier.height(8.dp))
             Text(
                 text = state.unavailableReason
-                    ?: "This episode does not expose a direct source the native player can use.",
+                    ?: "This episode does not expose a direct source or a recognized provider player.",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 textAlign = TextAlign.Center
@@ -693,10 +704,9 @@ private fun UnavailableSourceScreen(
                 color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f)
             ) {
                 Text(
-                    text = "AniStream only plays direct HLS, DASH or progressive sources that " +
-                        "Media3 can handle. These providers are third-party embed players, so " +
-                        "playing them inside the app would require extracting or bypassing them, " +
-                        "which AniStream does not do.",
+                    text = "The catalogue did not return a direct media source or a provider " +
+                        "player page for this episode. AniStream does not scrape, extract or " +
+                        "bypass provider players.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(14.dp)

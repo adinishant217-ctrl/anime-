@@ -87,11 +87,11 @@ fun EpisodeDto.toDomain(): Episode {
 fun EpisodeDetailDto.toDomain(): EpisodeDetail = EpisodeDetail(
     slug = slug,
     title = title,
-    url = url.nullIfBlank(),
+    url = url.normalizeUrl(),
     releaseTime = waktu_rilis.nullIfBlank(),
     previousEpisodeSlug = prev_episode.episodeSlug(),
     nextEpisodeSlug = next_episode.episodeSlug(),
-    defaultStreamUrl = defaultstreaming.nullIfBlank(),
+    defaultStreamUrl = defaultstreaming.normalizeUrl(),
     qualities = stream.orEmpty().map { it.toDomain() }.filter { it.providers.isNotEmpty() || it.label.isNotBlank() }
 )
 
@@ -102,7 +102,7 @@ fun StreamQualityDto.toDomain(): StreamQuality = StreamQuality(
 
 fun ProviderDto.toDomain(): StreamProvider = StreamProvider(
     name = provider,
-    url = url
+    url = url.normalizeUrl().orEmpty()
 )
 
 fun SearchDataDto.toDomain(): SearchResult = SearchResult(
@@ -173,3 +173,13 @@ fun JsonElement?.batchSlug(): String? = when (this) {
 private fun String?.nullIfBlank(): String? = this?.trim()?.takeIf { it.isNotEmpty() }
 
 private fun String?.cleanUrl(): String? = this?.trim()?.takeIf { it.isNotEmpty() }
+
+/**
+ * Provider URLs occasionally arrive HTML-escaped from the upstream catalogue.
+ * Android's Uri/WebView/Media3 need the actual query delimiter, not `&amp;`.
+ */
+private fun String?.normalizeUrl(): String? = this
+    ?.trim()
+    ?.replace("&amp;", "&")
+    ?.replace("&#038;", "&")
+    ?.takeIf { it.isNotEmpty() }

@@ -160,26 +160,46 @@ be missing.
 
 ## Playback capability
 
-The original CLI passes a provider URL to **MPV** and relies on **yt-dlp** to
-extract a playable stream, or opens the URL in a desktop browser. That is not a
-native Android playback path:
+The original CLI's real behaviour for these providers is important:
 
-- Media3/ExoPlayer cannot render an embed HTML page.
-- AniStream must not scrape, extract or bypass the embed providers; the project
-  brief explicitly forbids bypassing provider protections.
-- No authorized direct stream URL is supplied by the API.
+- `src/index.ts` checks whether a provider URL contains `/embed/` or `player`
+  and, for those URLs, opens the page in the desktop browser. It does not hand
+  them to MPV.
+- `playUrl` in `src/player.ts` only invokes MPV for other URLs. MPV's optional
+  yt-dlp hook is a desktop-only extractor and is not an Android player.
+- When MPV/browser playback is unavailable, the CLI opens the provider page in
+  the browser. That is an embedded-player fallback, not native extraction.
+
+AniStream reproduces that documented workflow on Android:
+
+- Direct HTTP(S) media URLs ending in `.mp4`, `.m4v`, `.m3u8`, `.mpd`, `.mkv`,
+  `.webm` or `.mov` are played by Media3 ExoPlayer. Requests include the
+  episode-page `Referer` and a browser-compatible `User-Agent`; HLS, DASH and
+  progressive MIME types are supplied where known. Redirects, timeouts,
+  cancellation and one re-resolve after an expired-URL error are handled.
+- Recognized provider pages (`/embed`, `/player`, `/e/`, `/v/`, `/iframe`,
+  `/dstream`, `video.g`) are loaded top-level in the provider's own WebView
+  player. The resolver deliberately rejects an arbitrary HTML page instead of
+  presenting it as video. The user can switch providers, go fullscreen (when the
+  provider requests it), or open the page in the browser.
+- Anything else is explicitly unavailable. The app does not scrape, extract,
+  proxy or bypass DRM, authentication, anti-bot challenges, geo-restrictions or
+  provider access controls.
+
+Key limitations:
+
+- Media3 cannot render embed HTML; the WebView fallback keeps provider control.
+- No direct media, subtitle list or audio list is supplied by the API.
 - `downloads[].links[]` point at file hosts behind redirects, not stable direct
   media URLs.
+- Provider pages can reject embedded playback. In a CI-server check on
+  24 Nov 2026, filedon returned HTTP 200 HTML, vidhide returned 403, and
+  desustream returned 403 with `X-Frame-Options: SAMEORIGIN`. Results can differ
+  on a phone, and the app surfaces failures instead of claiming success.
 
-Therefore AniStream implements a complete Media3 player (including HLS/DASH
-support, track selection, resume and progress saving) but the source resolver
-only accepts direct URLs ending in `.mp4`, `.m3u8`, `.mpd`, `.mkv`, `.webm` or
-`.mov`. For the current catalogue, every episode is embed-only, so the player
-shows a clear **No native source available** state instead of pretending to
-play. If the API later returns a direct source, the same player will use it
-without catalogue-specific code.
-
-This limitation is a property of the data source, not a missing player feature.
+This is a property of the data source and its providers, not a missing Media3
+feature. Actual playback was not verified on a physical device or emulator in
+this environment.
 
 ## Fields AniStream does not invent
 

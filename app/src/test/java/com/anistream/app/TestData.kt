@@ -66,6 +66,7 @@ object TestData {
     fun embedEpisode(): EpisodeDetail = EpisodeDetail(
         slug = "anime-a-episode-1",
         title = "Anime A Episode 1 Subtitle Indonesia",
+        url = "https://otakudesu.blog/episode/anime-a-episode-1/",
         nextEpisodeSlug = null,
         defaultStreamUrl = "https://desustream.net/embed/abc",
         qualities = listOf(

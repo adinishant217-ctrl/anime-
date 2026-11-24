@@ -39,6 +39,7 @@ class FakeAnimeRepository : AnimeRepository {
     var detail: AnimeDetail = TestData.detail()
     var episodeDetail: EpisodeDetail = TestData.embedEpisode()
     var failAll: Boolean = false
+    var episodeCalls: Int = 0
 
     private fun <T> result(value: T): Result<T> =
         if (failAll) Result.failure(ApiException("Test failure")) else Result.success(value)
@@ -57,7 +58,10 @@ class FakeAnimeRepository : AnimeRepository {
 
     override suspend fun getAnimeDetail(slug: String): Result<AnimeDetail> = result(detail)
 
-    override suspend fun getEpisode(slug: String): Result<EpisodeDetail> = result(episodeDetail)
+    override suspend fun getEpisode(slug: String): Result<EpisodeDetail> {
+        episodeCalls++
+        return result(episodeDetail)
+    }
 }
 
 class FakeLibraryRepository : LibraryRepository {
@@ -177,13 +181,28 @@ class FakePlaybackEngine : PlaybackEngine {
 
     var preparedUrl: String? = null
     var preparedPosition: Long = 0L
+    var preparedHeaders: Map<String, String> = emptyMap()
+    var preparedMimeType: String? = null
+    var prepareCount: Int = 0
     var released: Boolean = false
     var stopped: Boolean = false
 
-    override fun prepare(url: String, startPositionMs: Long) {
+    override fun prepare(
+        url: String,
+        startPositionMs: Long,
+        headers: Map<String, String>,
+        mimeType: String?
+    ) {
         preparedUrl = url
         preparedPosition = startPositionMs
+        preparedHeaders = headers
+        preparedMimeType = mimeType
+        prepareCount++
         state.value = state.value.copy(isReady = true, error = null, ended = false)
+    }
+
+    fun fail(message: String) {
+        state.value = state.value.copy(error = message, isBuffering = false)
     }
 
     override fun play() {
@@ -204,7 +223,7 @@ class FakePlaybackEngine : PlaybackEngine {
     }
 
     override fun retry() {
-        preparedUrl?.let { prepare(it, state.value.positionMs) }
+        preparedUrl?.let { prepare(it, state.value.positionMs, preparedHeaders, preparedMimeType) }
     }
 
     override fun selectTrack(option: TrackOption) = Unit

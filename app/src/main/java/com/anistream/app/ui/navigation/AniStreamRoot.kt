@@ -317,7 +317,7 @@ fun AniStreamRoot(container: AppContainer) {
                                 animeRepository = container.animeRepository,
                                 libraryRepository = container.libraryRepository,
                                 settingsRepository = container.settingsRepository,
-                                sourceResolver = container.createPlaybackSourceResolver(),
+                                sourceResolver = container.createPlaybackResolver(),
                                 engine = container.createPlaybackEngine(),
                                 applicationScope = container.applicationScope
                             )

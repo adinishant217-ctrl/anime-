@@ -8,7 +8,9 @@ import androidx.media3.common.Player
 import androidx.media3.common.TrackSelectionOverride
 import androidx.media3.common.Tracks
 import androidx.media3.common.util.UnstableApi
+import androidx.media3.datasource.DefaultHttpDataSource
 import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import com.anistream.app.player.state.PlaybackEngineState
 import com.anistream.app.player.state.TrackKind
 import com.anistream.app.player.state.TrackOption
@@ -27,7 +29,14 @@ import kotlinx.coroutines.launch
 @androidx.annotation.OptIn(UnstableApi::class)
 class Media3PlaybackEngine(context: Context) : PlaybackEngine {
 
-    private val exoPlayer: ExoPlayer = ExoPlayer.Builder(context.applicationContext).build()
+    private val httpDataSourceFactory = DefaultHttpDataSource.Factory()
+        .setConnectTimeoutMs(15_000)
+        .setReadTimeoutMs(20_000)
+        .setAllowCrossProtocolRedirects(true)
+
+    private val exoPlayer: ExoPlayer = ExoPlayer.Builder(context.applicationContext)
+        .setMediaSourceFactory(DefaultMediaSourceFactory(httpDataSourceFactory))
+        .build()
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private val _state = MutableStateFlow(PlaybackEngineState())
     override val state: StateFlow<PlaybackEngineState> = _state.asStateFlow()
@@ -35,6 +44,8 @@ class Media3PlaybackEngine(context: Context) : PlaybackEngine {
 
     private val trackLookup = mutableMapOf<String, Pair<Tracks.Group, Int>>()
     private var lastUrl: String? = null
+    private var lastHeaders: Map<String, String> = emptyMap()
+    private var lastMimeType: String? = null
     private var released = false
 
     init {
@@ -73,9 +84,23 @@ class Media3PlaybackEngine(context: Context) : PlaybackEngine {
         }
     }
 
-    override fun prepare(url: String, startPositionMs: Long) {
+    override fun prepare(
+        url: String,
+        startPositionMs: Long,
+        headers: Map<String, String>,
+        mimeType: String?
+    ) {
         if (released) return
         lastUrl = url
+        lastHeaders = headers
+        lastMimeType = mimeType
+        val userAgent = headers.entries.firstOrNull {
+            it.key.equals("User-Agent", ignoreCase = true)
+        }?.value
+        httpDataSourceFactory.setUserAgent(userAgent)
+        httpDataSourceFactory.setDefaultRequestProperties(
+            headers.filterKeys { !it.equals("User-Agent", ignoreCase = true) }
+        )
         _state.update {
             it.copy(
                 error = null,
@@ -85,7 +110,11 @@ class Media3PlaybackEngine(context: Context) : PlaybackEngine {
                 durationMs = 0L
             )
         }
-        exoPlayer.setMediaItem(MediaItem.fromUri(url))
+        val mediaItem = MediaItem.Builder()
+            .setUri(url)
+            .apply { if (!mimeType.isNullOrBlank()) setMimeType(mimeType) }
+            .build()
+        exoPlayer.setMediaItem(mediaItem)
         exoPlayer.prepare()
         if (startPositionMs > 0L) {
             exoPlayer.seekTo(startPositionMs)
@@ -111,13 +140,15 @@ class Media3PlaybackEngine(context: Context) : PlaybackEngine {
         exoPlayer.stop()
         exoPlayer.clearMediaItems()
         lastUrl = null
+        lastHeaders = emptyMap()
+        lastMimeType = null
         _state.value = PlaybackEngineState()
     }
 
     override fun retry() {
         val url = lastUrl ?: return
         val resumeAt = exoPlayer.currentPosition.coerceAtLeast(0L)
-        prepare(url, resumeAt)
+        prepare(url, resumeAt, lastHeaders, lastMimeType)
     }
 
     override fun selectTrack(option: TrackOption) {

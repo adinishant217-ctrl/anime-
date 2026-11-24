@@ -5,6 +5,7 @@ import com.anistream.app.data.remote.dto.AnimeDetailDto
 import com.anistream.app.data.remote.dto.AnimeListDto
 import com.anistream.app.data.remote.dto.EpisodeDetailDto
 import com.anistream.app.data.remote.dto.GenreDto
+import com.anistream.app.data.remote.dto.ProviderDto
 import com.anistream.app.data.remote.dto.ScheduleItemDto
 import com.anistream.app.data.remote.dto.SearchDataDto
 import com.anistream.app.data.remote.mapper.toDomain
@@ -63,6 +64,16 @@ class ApiParsingTest {
         assertEquals(3, episode.providerCount)
         assertEquals(2, episode.qualities.size)
         assertEquals("https://desustream.net/embed/x", episode.defaultStreamUrl)
+    }
+
+    @Test
+    fun `decodes html escaped provider query delimiters`() {
+        val provider = decodeApiData<ProviderDto>(json, ESCAPED_PROVIDER_JSON).toDomain()
+
+        assertEquals(
+            "https://www.blogger.com/video.g?token=abc&origin=example.blogspot.com",
+            provider.url
+        )
     }
 
     @Test
@@ -205,6 +216,16 @@ class ApiParsingTest {
               }
             ],
             "downloads": []
+          }
+        }
+        """
+
+        const val ESCAPED_PROVIDER_JSON = """
+        {
+          "meta": {"status": true, "code": 200, "message": "Success"},
+          "data": {
+            "provider": "blogs",
+            "url": "https://www.blogger.com/video.g?token=abc&amp;origin=example.blogspot.com"
           }
         }
         """

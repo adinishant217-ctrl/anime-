@@ -12,7 +12,12 @@ interface PlaybackEngine {
     /** Exposed for the Media3 PlayerView only. Null until a source is prepared. */
     val player: Player?
 
-    fun prepare(url: String, startPositionMs: Long = 0L)
+    fun prepare(
+        url: String,
+        startPositionMs: Long = 0L,
+        headers: Map<String, String> = emptyMap(),
+        mimeType: String? = null
+    )
     fun play()
     fun pause()
     fun seekTo(positionMs: Long)

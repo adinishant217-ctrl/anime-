@@ -13,8 +13,10 @@ import com.anistream.app.domain.repository.AnimeRepository
 import com.anistream.app.domain.repository.LibraryRepository
 import com.anistream.app.domain.repository.SettingsRepository
 import com.anistream.app.player.engine.PlaybackEngine
+import com.anistream.app.player.source.EmbeddedPlaybackSource
+import com.anistream.app.player.source.PlaybackKind
 import com.anistream.app.player.source.PlaybackResolution
-import com.anistream.app.player.source.PlaybackSourceResolver
+import com.anistream.app.player.source.PlaybackResolver
 import com.anistream.app.player.state.PlaybackEngineState
 import com.anistream.app.player.state.TrackKind
 import com.anistream.app.player.state.TrackOption
@@ -37,6 +39,11 @@ data class PlayerUiState(
     val sourceAvailable: Boolean = false,
     val unavailableReason: String? = null,
     val providers: List<StreamProvider> = emptyList(),
+    val playbackKind: PlaybackKind = PlaybackKind.UNAVAILABLE,
+    val embeddedSources: List<EmbeddedPlaybackSource> = emptyList(),
+    val selectedEmbeddedSource: EmbeddedPlaybackSource? = null,
+    val embeddedLoading: Boolean = false,
+    val embeddedError: String? = null,
     val availableQualities: List<String> = emptyList(),
     val selectedQuality: String? = null,
     val isPlaying: Boolean = false,
@@ -61,7 +68,7 @@ class PlayerViewModel(
     private val animeRepository: AnimeRepository,
     private val libraryRepository: LibraryRepository,
     private val settingsRepository: SettingsRepository,
-    private val sourceResolver: PlaybackSourceResolver,
+    private val sourceResolver: PlaybackResolver,
     private val engine: PlaybackEngine,
     private val applicationScope: CoroutineScope
 ) : ViewModel() {
@@ -83,6 +90,7 @@ class PlayerViewModel(
     private var handledEnd = false
     private var loadJob: Job? = null
     private var requestedEpisodeSlug: String = initialEpisodeSlug
+    private var autoRefreshUsed = false
 
     init {
         viewModelScope.launch {
@@ -99,6 +107,15 @@ class PlayerViewModel(
     }
 
     fun loadEpisode(episodeSlug: String, allowResume: Boolean = true) {
+        autoRefreshUsed = false
+        loadEpisodeInternal(episodeSlug, allowResume, isAutoRefresh = false)
+    }
+
+    private fun loadEpisodeInternal(
+        episodeSlug: String,
+        allowResume: Boolean,
+        isAutoRefresh: Boolean
+    ) {
         loadJob?.cancel()
         requestedEpisodeSlug = episodeSlug
         handledEnd = false
@@ -107,10 +124,15 @@ class PlayerViewModel(
             it.copy(
                 loading = true,
                 error = null,
-                episodeSwitchLoading = true,
+                episodeSwitchLoading = !isAutoRefresh,
                 playbackError = null,
                 sourceAvailable = false,
                 unavailableReason = null,
+                playbackKind = PlaybackKind.UNAVAILABLE,
+                embeddedSources = emptyList(),
+                selectedEmbeddedSource = null,
+                embeddedLoading = false,
+                embeddedError = null,
                 showResumeNotice = false
             )
         }
@@ -203,11 +225,17 @@ class PlayerViewModel(
                     detail = detail,
                     episode = episode,
                     episodeDetail = episodeDetail,
-                    sourceAvailable = resolution.isPlayable,
+                    sourceAvailable = resolution.isNative,
                     unavailableReason = resolution.unavailableReason,
                     providers = resolution.providers,
+                    playbackKind = resolution.kind,
+                    embeddedSources = resolution.embeddedSources,
+                    selectedEmbeddedSource = resolution.embeddedSources.firstOrNull(),
+                    embeddedLoading = resolution.isEmbedded,
+                    embeddedError = null,
                     availableQualities = resolution.sources.map { source -> source.qualityLabel }.distinct(),
-                    selectedQuality = resolution.sources.firstOrNull()?.qualityLabel,
+                    selectedQuality = resolution.sources.firstOrNull()?.qualityLabel
+                        ?: resolution.embeddedSources.firstOrNull()?.qualityLabel,
                     positionMs = resumeAt,
                     durationMs = saved?.durationMs ?: 0L,
                     resumedFromMs = resumeAt,
@@ -219,9 +247,15 @@ class PlayerViewModel(
                 )
             }
 
-            if (resolution.isPlayable) {
+            if (resolution.isNative) {
+                val source = resolution.sources.first()
                 lastSavedAt = 0L
-                engine.prepare(resolution.sources.first().url, resumeAt)
+                engine.prepare(
+                    url = source.url,
+                    startPositionMs = resumeAt,
+                    headers = source.headers,
+                    mimeType = source.mimeType
+                )
             } else {
                 engine.stop()
             }
@@ -254,7 +288,42 @@ class PlayerViewModel(
             )
         }
         lastSavedAt = 0L
-        engine.prepare(source.url, position)
+        engine.prepare(
+            url = source.url,
+            startPositionMs = position,
+            headers = source.headers,
+            mimeType = source.mimeType
+        )
+    }
+
+    fun selectEmbeddedSource(source: EmbeddedPlaybackSource) {
+        val available = currentResolution?.embeddedSources.orEmpty()
+        if (available.none { it.url == source.url }) return
+        _state.update {
+            it.copy(
+                selectedEmbeddedSource = source,
+                embeddedLoading = true,
+                embeddedError = null,
+                selectedQuality = source.qualityLabel
+            )
+        }
+    }
+
+    fun onEmbeddedPageStarted() {
+        _state.update { it.copy(embeddedLoading = true, embeddedError = null) }
+    }
+
+    fun onEmbeddedPageFinished() {
+        _state.update { it.copy(embeddedLoading = false) }
+    }
+
+    fun onEmbeddedPageError(message: String) {
+        _state.update {
+            it.copy(
+                embeddedLoading = false,
+                embeddedError = message.ifBlank { "The provider player could not be loaded." }
+            )
+        }
     }
 
     fun selectAudioTrack(option: TrackOption) {
@@ -270,11 +339,8 @@ class PlayerViewModel(
     }
 
     fun retryPlayback() {
-        if (_state.value.sourceAvailable) {
-            engine.retry()
-        } else {
-            loadEpisode(requestedEpisodeSlug)
-        }
+        autoRefreshUsed = false
+        loadEpisodeInternal(requestedEpisodeSlug, allowResume = true, isAutoRefresh = false)
     }
 
     fun nextEpisode() {
@@ -306,6 +372,7 @@ class PlayerViewModel(
     }
 
     fun saveNow() {
+        if (!_state.value.sourceAvailable) return
         val anime = currentDetail ?: return
         val episode = currentEpisode ?: return
         val engineState = engine.state.value
@@ -344,6 +411,20 @@ class PlayerViewModel(
                 audioTracks = engineState.audioTracks,
                 subtitleTracks = engineState.subtitleTracks
             )
+        }
+
+        if (
+            engineState.error != null &&
+            currentResolution?.isNative == true &&
+            !autoRefreshUsed &&
+            !_state.value.loading &&
+            !_state.value.episodeSwitchLoading
+        ) {
+            // A temporary CDN URL commonly expires with a 403/404. Resolve the
+            // episode once more, then let the normal error UI handle a repeat.
+            autoRefreshUsed = true
+            loadEpisodeInternal(requestedEpisodeSlug, allowResume = true, isAutoRefresh = true)
+            return
         }
 
         val anime = currentDetail
